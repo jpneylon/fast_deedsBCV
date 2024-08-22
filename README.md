@@ -1,3 +1,7 @@
+# fast_deedsBCV
+This is a CUDA implementation of deedsBCV, developed on Ubuntu 22.04 with CUDA 12.2
+Compiled (see Makefile in src directory) and tested on a limited dataset to give exactly matching results to the CPU version with approximately 5x speed up
+
 # deedsBCV
 Code for efficient 3D discrete deformable registration for medical images
 
