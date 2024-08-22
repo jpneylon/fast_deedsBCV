@@ -1,6 +1,14 @@
+/*
+ *       Modified by Jack Neylon, PhD
+ *                  University of California Los Angeles
+ *                  200 Medical Plaza, Suite B265
+ *                  Los Angeles, CA 90095
+ *       2024-04-03
+*/
+
 #include <iostream>
 #include <fstream>
-#include <math.h>
+#include <cmath>
 #include <sys/time.h>
 #include <vector>
 #include <algorithm>
@@ -109,7 +117,7 @@ int main (int argc, char * const argv[]) {
                       
     //READ IMAGES and INITIALISE ARRAYS
     
-    timeval time1,time2,time1a,time2a;
+    timeval time1,time2,time1a,time2a,time3;
 
 	RAND_SAMPLES=1; //fixed/efficient random sampling strategy
 	
@@ -118,12 +126,13 @@ int main (int argc, char * const argv[]) {
 	int M,N,O,P; //image dimensions
     
     //==ALWAYS ALLOCATE MEMORY FOR HEADER ===/
-	char* header=new char[352];
+	char* fheader=new char[352];
+	char* mheader=new char[352];
     
-	readNifti(args.fixed_file,im1b,header,M,N,O,P);
+	readNifti(args.fixed_file,im1b,fheader,M,N,O,P);
     image_m=M; image_n=N; image_o=O;
 
-	readNifti(args.moving_file,im1,header,M,N,O,P);
+	readNifti(args.moving_file,im1,mheader,M,N,O,P);
 	
 
     if(M!=image_m|N!=image_n|O!=image_o){
@@ -205,8 +214,12 @@ int main (int argc, char * const argv[]) {
 	}
 	
     float* warped0=new float[m*n*o];
+    // gettimeofday(&time1a, NULL);
     warpAffine(warped0,im1,im1b,X,ux,vx,wx);
-    
+    cout<<"\nSSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
+    // gettimeofday(&time2a, NULL);
+    // float timeWARP=time2a.tv_sec+time2a.tv_usec/1e6-(time1a.tv_sec+time1a.tv_usec/1e6);
+    // cout<<"\n Warp="<<timeWARP<<flush;
 
     uint64_t* im1_mind=new uint64_t[m*n*o];
     uint64_t* im1b_mind=new uint64_t[m*n*o];
@@ -214,6 +227,10 @@ int main (int argc, char * const argv[]) {
 	
 	gettimeofday(&time1a, NULL);
     float timeDataSmooth=0;
+    float totalTimeMind=0;
+    float totalTimeData=0;
+    float totalTimeSmooth=0;
+    float totalTimeTrans=0;
 	//==========================================================================================
 	//==========================================================================================
 
@@ -227,23 +244,27 @@ int main (int argc, char * const argv[]) {
 		
         if(level==0|prev!=curr){
             gettimeofday(&time1, NULL);
-            descriptor(im1_mind,warped0,m,n,o,mind_step[level]);//im1 affine
+            descriptor(im1_mind,warped0,m,n,o,mind_step[level]);
             descriptor(im1b_mind,im1b,m,n,o,mind_step[level]);
             gettimeofday(&time2, NULL);
             timeMIND+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
+            cout<<"\nInitial MIND="<<timeMIND<<flush;
 		}
 		
 		step1=args.grid_spacing[level];
 		hw1=args.search_radius[level];
 		
 		int len3=pow(hw1*2+1,3);
-		m1=m/step1; n1=n/step1; o1=o/step1; sz1=m1*n1*o1;
+		m1=m/step1; 
+        n1=n/step1; 
+        o1=o/step1; 
+        sz1=m1*n1*o1;
         
         float* costall=new float[sz1*len3]; 
         float* u0=new float[sz1]; float* v0=new float[sz1]; float* w0=new float[sz1];
 		int* ordered=new int[sz1]; int* parents=new int[sz1]; float* edgemst=new float[sz1];
 		
-        cout<<"==========================================================\n";
+        cout<<"\n==========================================================\n";
 		cout<<"Level "<<level<<" grid="<<step1<<" with sizes: "<<m1<<"x"<<n1<<"x"<<o1<<" hw="<<hw1<<" quant="<<quant1<<"\n";
 		cout<<"==========================================================\n";
 		
@@ -252,56 +273,71 @@ int main (int argc, char * const argv[]) {
 		upsampleDeformationsCL(u0,v0,w0,u1,v1,w1,m1,n1,o1,m2,n2,o2);
         upsampleDeformationsCL(ux,vx,wx,u0,v0,w0,m,n,o,m1,n1,o1);
         //float dist=landmarkDistance(ux,vx,wx,m,n,o,distsmm,casenum);
+        cout<<"\n\n";
+        //verified
 		warpAffine(warped1,im1,im1b,X,ux,vx,wx);
+        cout<<"\nSSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
 		u1=new float[sz1]; v1=new float[sz1]; w1=new float[sz1];
         gettimeofday(&time2, NULL);
 		timeTrans+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"T"<<flush;
+        cout<<"\nTransforms="<<timeTrans<<flush;
         gettimeofday(&time1, NULL);
 		descriptor(warped_mind,warped1,m,n,o,mind_step[level]);
 
         gettimeofday(&time2, NULL);
 		timeMIND+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"M"<<flush;
+        cout<<"\nMIND="<<timeMIND<<flush;
         gettimeofday(&time1, NULL);
         dataCostCL((unsigned long*)im1b_mind,(unsigned long*)warped_mind,costall,m,n,o,len3,step1,hw1,quant1,args.alpha,RAND_SAMPLES);
         gettimeofday(&time2, NULL);
 
 		timeData+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"D"<<flush;
+        cout<<"\nDataCost="<<timeData<<flush;
         gettimeofday(&time1, NULL);
         primsGraph(im1b,ordered,parents,edgemst,step1,m,n,o);
+        gettimeofday(&time3, NULL);
         regularisationCL(costall,u0,v0,w0,u1,v1,w1,hw1,step1,quant1,ordered,parents,edgemst);
         gettimeofday(&time2, NULL);
+        float timePrims = time3.tv_sec+time3.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
+        cout<<"\nPrims="<<timePrims<<flush;
+        float timeRegularization = time2.tv_sec+time2.tv_usec/1e6-(time3.tv_sec+time3.tv_usec/1e6);
+        cout<<"\nRegularization="<<timeRegularization<<flush;
 		timeSmooth+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"S"<<flush;
+        cout<<"\nSmoothing="<<timeSmooth<<flush;
 		
         //FULL-REGISTRATION BACKWARDS
         gettimeofday(&time1, NULL);
 		upsampleDeformationsCL(u0,v0,w0,u1i,v1i,w1i,m1,n1,o1,m2,n2,o2);
         upsampleDeformationsCL(ux,vx,wx,u0,v0,w0,m,n,o,m1,n1,o1);
+        // verified
 		warpImageCL(warped1,im1b,warped0,ux,vx,wx);
+        cout<<"\nSSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
 		u1i=new float[sz1]; v1i=new float[sz1]; w1i=new float[sz1];
         gettimeofday(&time2, NULL);
 		timeTrans+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"T"<<flush;
+        cout<<"\nTransforms="<<timeTrans<<flush;
         gettimeofday(&time1, NULL);
 		descriptor(warped_mind,warped1,m,n,o,mind_step[level]);
 
         gettimeofday(&time2, NULL);
 		timeMIND+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"M"<<flush;
+        cout<<"\nMIND="<<timeMIND<<flush;
         gettimeofday(&time1, NULL);
         dataCostCL((unsigned long*)im1_mind,(unsigned long*)warped_mind,costall,m,n,o,len3,step1,hw1,quant1,args.alpha,RAND_SAMPLES);
         gettimeofday(&time2, NULL);
 		timeData+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"D"<<flush;
+        cout<<"\nDataCost="<<timeData<<flush;
         gettimeofday(&time1, NULL);
         primsGraph(warped0,ordered,parents,edgemst,step1,m,n,o);
+        gettimeofday(&time3, NULL);
         regularisationCL(costall,u0,v0,w0,u1i,v1i,w1i,hw1,step1,quant1,ordered,parents,edgemst);
         gettimeofday(&time2, NULL);
+        timePrims = time3.tv_sec+time3.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
+        cout<<"\nPrims="<<timePrims<<flush;
+        timeRegularization = time2.tv_sec+time2.tv_usec/1e6-(time3.tv_sec+time3.tv_usec/1e6);
+        cout<<"\nRegularization="<<timeRegularization<<flush;
 		timeSmooth+=time2.tv_sec+time2.tv_usec/1e6-(time1.tv_sec+time1.tv_usec/1e6);
-        cout<<"S"<<flush;
+        cout<<"\nSmoothing="<<timeSmooth<<flush;
 		
         cout<<"\nTime: MIND="<<timeMIND<<", data="<<timeData<<", MST-reg="<<timeSmooth<<", transf.="<<timeTrans<<"\n speed="<<2.0*(float)sz1*(float)len3/(timeData+timeSmooth)<<" dof/s\n";
         
@@ -315,7 +351,7 @@ int main (int argc, char * const argv[]) {
 		//upsample deformations from grid-resolution to high-resolution (trilinear=1st-order spline)
 		float jac=jacobian(u1,v1,w1,m1,n1,o1,step1);
 		
-        cout<<"SSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
+        cout<<"\nSSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
 		m2=m1; n2=n1; o2=o1;
 		cout<<"\n";
        
@@ -324,16 +360,17 @@ int main (int argc, char * const argv[]) {
         
 		delete parents; delete ordered;
         
-		
+		timeDataSmooth += timeMIND + timeData + timeSmooth + timeTrans;
+        totalTimeMind += timeMIND;
+        totalTimeData += timeData;
+        totalTimeSmooth += timeSmooth;
+        totalTimeTrans += timeTrans;
 	}
     delete im1_mind;
     delete im1b_mind;
 	//==========================================================================================
 	//==========================================================================================
-	
-    gettimeofday(&time2a, NULL);
-	float timeALL=time2a.tv_sec+time2a.tv_usec/1e6-(time1a.tv_sec+time1a.tv_usec/1e6);
-    
+	    
     upsampleDeformationsCL(ux,vx,wx,u1,v1,w1,m,n,o,m1,n1,o1);
 	
     float* flow=new float[sz1*3];
@@ -345,20 +382,24 @@ int main (int argc, char * const argv[]) {
     
     //WRITE OUTPUT DISPLACEMENT FIELD AND IMAGE
     writeOutput(flow,outputflow.c_str(),sz1*3);
+    // verified
     warpAffine(warped1,im1,im1b,X,ux,vx,wx);
 	
     for(int i=0;i<sz;i++){
         warped1[i]+=thresholdM;
     }
-    
-    gzWriteNifti(outputfile,warped1,header,m,n,o,1);
 
     cout<<"SSD before registration: "<<SSD0<<" and after "<<SSD1<<"\n";
+
+    gettimeofday(&time2a, NULL);
+	float timeALL=time2a.tv_sec+time2a.tv_usec/1e6-(time1a.tv_sec+time1a.tv_usec/1e6);
+
+    gzWriteNifti(outputfile,warped1,fheader,m,n,o,1);
     
     // if SEGMENTATION of moving image is provided APPLY SAME TRANSFORM
     if(args.segment){
         short* seg2;
-        readNifti(args.moving_seg_file,seg2,header,M,N,O,P);
+        readNifti(args.moving_seg_file,seg2,mheader,M,N,O,P);
         
         short* segw=new short[sz];
         fill(segw,segw+sz,0);
@@ -373,11 +414,11 @@ int main (int argc, char * const argv[]) {
         
 
         
-        gzWriteSegment(outputseg,segw,header,m,n,o,1);
+        gzWriteSegment(outputseg,segw,fheader,m,n,o,1);
     }
     
-	cout<<"Finished. Total time: "<<timeALL<<" sec. ("<<timeDataSmooth<<" sec. for MIND+data+reg+trans)\n";
-	
+    cout<<"\nTotal Times: \nMIND="<<totalTimeMind<<" \nData="<<totalTimeData<<" \nSmooth="<<totalTimeSmooth<<" \nTransf="<<totalTimeTrans<<"\n";
+	cout<<"Finished. Total time: "<<timeALL<<" sec. \n"<<timeDataSmooth<<" sec. for MIND+data+reg+trans)\n";
 	
 	return 0;
 }

@@ -95,7 +95,7 @@ void readNifti(string filestr,Type*& vol,char*& header,int& m,int& n,int& o,int&
             printf("Datatype %d not supported. Exiting.\n",datatype[0]);
             exit(1);
     }
-    delete filecharptr;
+    delete[] filecharptr;
     
     //gzread(file,vol,sz*sizeof(Type));
     //vol=reinterpret_cast<Type*>(vol);
